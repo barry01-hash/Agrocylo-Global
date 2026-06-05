@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   MapPin,
   Search,
@@ -22,6 +22,8 @@ import { Separator } from "@/components/ui/separator";
 import type { BuyerIntent } from "@/types/demand";
 import { ProductCategory } from "@/types/product";
 import { cn } from "@/lib/utils";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import BuyerIntentResponse from "./BuyerIntentResponse";
 
 type SortKey = "date" | "volume" | "rating";
 
@@ -59,6 +61,7 @@ function StarRating({ rating }: { rating: number }) {
 
 function IntentCard({ intent }: { intent: BuyerIntent }) {
   const [expanded, setExpanded] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   return (
     <div
@@ -153,14 +156,19 @@ function IntentCard({ intent }: { intent: BuyerIntent }) {
             )}
 
             <div className="flex gap-2 pt-1">
-              <Button size="sm" className="flex-1 text-xs">
+              <Button size="sm" className="flex-1 text-xs" onClick={() => setModalOpen(true)}>
                 Express Interest
               </Button>
-              <Button size="sm" variant="outline" className="flex-1 text-xs">
+              <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => setModalOpen(true)}>
                 Contact Buyer
               </Button>
             </div>
           </div>
+          <BuyerIntentResponse
+            intent={intent}
+            isOpen={modalOpen}
+            onClose={() => setModalOpen(false)}
+          />
         </>
       )}
     </div>
@@ -171,6 +179,8 @@ export function BuyerIntents({ intents }: BuyerIntentsProps) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<ProductCategory | "All">("All");
   const [sort, setSort] = useState<SortKey>("date");
+  const { trackFilterUsage, trackSearchQuery, trackFeatureAdoption } =
+    useAnalytics();
 
   const displayed = useMemo(() => {
     let result = intents.filter((i) => {
@@ -203,6 +213,27 @@ export function BuyerIntents({ intents }: BuyerIntentsProps) {
     return result;
   }, [intents, search, category, sort]);
 
+  useEffect(() => {
+    const trimmed = search.trim();
+    if (!trimmed) return;
+    const timer = setTimeout(() => {
+      trackSearchQuery(trimmed, { source: "buyer-intents" });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search, trackSearchQuery]);
+
+  useEffect(() => {
+    trackFilterUsage("buyer_intents_category", category, {
+      source: "buyer-intents",
+    });
+  }, [category, trackFilterUsage]);
+
+  useEffect(() => {
+    trackFilterUsage("buyer_intents_sort", sort, {
+      source: "buyer-intents",
+    });
+  }, [sort, trackFilterUsage]);
+
   return (
     <Card>
       <CardHeader>
@@ -225,10 +256,15 @@ export function BuyerIntents({ intents }: BuyerIntentsProps) {
         {/* Category filter */}
         <div className="mt-2 flex flex-wrap gap-1">
           {CATEGORIES.map((c) => (
-            <button
-              key={c}
-              onClick={() => setCategory(c)}
-              className={cn(
+              <button
+                key={c}
+              onClick={() => {
+                trackFeatureAdoption("buyer_intents_filter", {
+                  category: c,
+                });
+                setCategory(c);
+              }}
+                className={cn(
                 "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
                 category === c
                   ? "bg-primary text-primary-foreground"
@@ -246,7 +282,12 @@ export function BuyerIntents({ intents }: BuyerIntentsProps) {
           {(["date", "volume", "rating"] as SortKey[]).map((s) => (
             <button
               key={s}
-              onClick={() => setSort(s)}
+              onClick={() => {
+                trackFeatureAdoption("buyer_intents_sort", {
+                  sort: s,
+                });
+                setSort(s);
+              }}
               className={cn(
                 "rounded-md px-2 py-0.5 text-[11px] font-medium capitalize transition-colors",
                 sort === s
@@ -259,7 +300,13 @@ export function BuyerIntents({ intents }: BuyerIntentsProps) {
           ))}
           {(search || category !== "All") && (
             <button
-              onClick={() => { setSearch(""); setCategory("All"); }}
+              onClick={() => {
+                trackFilterUsage("buyer_intents_reset", "reset", {
+                  source: "buyer-intents",
+                });
+                setSearch("");
+                setCategory("All");
+              }}
               className="text-muted-foreground ml-auto flex items-center gap-1 text-[11px] hover:text-foreground"
             >
               <RotateCcw className="size-3" /> Reset

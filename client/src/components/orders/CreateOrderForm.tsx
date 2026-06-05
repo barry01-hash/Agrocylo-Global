@@ -18,13 +18,16 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useEscrowContract } from "@/hooks/useEscrowContract";
 import { useWallet } from "@/hooks/useWallet";
+import { useAnalytics } from "@/hooks/useAnalytics";
+import { createOrderFormSchema } from "@/lib/validation";
+import { FormError } from "@/components/FormError";
 
 const PLATFORM_FEE_PCT = 3;
 
-// XLM SAC contract — required to settle native XLM through escrow. Set
-// NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID in .env.local (testnet XLM SAC).
 const NATIVE_TOKEN_CONTRACT_ID =
   process.env.NEXT_PUBLIC_NATIVE_TOKEN_CONTRACT_ID ?? "";
+
+type FormErrors = Partial<Record<"farmer" | "amount" | "deliveryDeadline", string>>;
 
 export default function CreateOrderForm() {
   const searchParams = useSearchParams();
@@ -32,6 +35,8 @@ export default function CreateOrderForm() {
 
   const { connected } = useWallet();
   const { createOrder, createState } = useEscrowContract();
+  const { trackFunnelStep, trackTransactionAttempt, trackFormSubmission } =
+    useAnalytics();
 
   const [farmer, setFarmer] = useState(prefilledFarmer);
   const [amount, setAmount] = useState("");
@@ -41,23 +46,63 @@ export default function CreateOrderForm() {
     "idle",
   );
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [errors, setErrors] = useState<FormErrors>({});
 
   const numAmount = parseFloat(amount);
   const hasAmount = numAmount > 0;
-  const hasFarmer = farmer.trim().length > 0;
-  const hasDeadline = deliveryDeadline.length > 0;
-  const isValid = hasFarmer && hasAmount && hasDeadline;
 
   const fee = hasAmount ? (numAmount * PLATFORM_FEE_PCT) / 100 : 0;
   const farmerReceives = hasAmount ? numAmount - fee : 0;
 
+  function validate(): boolean {
+    const result = createOrderFormSchema.safeParse({
+      farmer: farmer.trim(),
+      amount,
+      deliveryDeadline,
+      description: description || undefined,
+    });
+
+    if (!result.success) {
+      const fieldMap: Record<string, keyof FormErrors> = {
+        farmer: "farmer",
+        amount: "amount",
+        deliveryDeadline: "deliveryDeadline",
+      };
+      const next: FormErrors = {};
+      for (const issue of result.error.issues) {
+        const field = issue.path?.[0] as string;
+        const formKey = fieldMap[field];
+        if (formKey && !next[formKey]) {
+          next[formKey] = issue.message;
+        }
+      }
+      setErrors(next);
+      return false;
+    }
+
+    setErrors({});
+    return true;
+  }
+
   async function handleSubmit() {
-    if (!isValid) return;
+    if (!validate()) return;
     if (!NATIVE_TOKEN_CONTRACT_ID) {
       setTxStep("error");
       return;
     }
     try {
+      trackFormSubmission("escrow_order_form", {
+        farmer: farmer.trim(),
+        amount: numAmount,
+      });
+      trackTransactionAttempt("purchase", "started", {
+        farmer: farmer.trim(),
+        amount: numAmount,
+        deadline: deliveryDeadline,
+      });
+      trackFunnelStep("purchase", "checkout_submitted", {
+        amount: numAmount,
+      });
       setTxStep("signing");
       const stroops = BigInt(Math.round(numAmount * 1e7));
       const result = await createOrder(
@@ -68,8 +113,19 @@ export default function CreateOrderForm() {
       );
       setTxStep("done");
       setTxHash(result?.txHash ?? null);
+      trackTransactionAttempt("purchase", "confirmed", {
+        farmer: farmer.trim(),
+        amount: numAmount,
+      });
+      trackFunnelStep("purchase", "checkout_completed", {
+        amount: numAmount,
+      });
     } catch {
       setTxStep("error");
+      trackTransactionAttempt("purchase", "failed", {
+        farmer: farmer.trim(),
+        amount: numAmount,
+      });
     }
   }
 
@@ -106,6 +162,7 @@ export default function CreateOrderForm() {
                 setDeliveryDeadline("");
                 setDescription("");
                 setTxHash(null);
+                trackFunnelStep("purchase", "checkout_reset");
               }}
             >
               Create Another
@@ -170,8 +227,12 @@ export default function CreateOrderForm() {
           label="Farmer Address"
           placeholder="G…"
           value={farmer}
-          onChange={(e) => setFarmer(e.target.value)}
+          onChange={(e) => {
+            setFarmer(e.target.value);
+            if (errors.farmer) setErrors((prev) => ({ ...prev, farmer: undefined }));
+          }}
           spellCheck={false}
+          error={errors.farmer}
         />
 
         <Input
@@ -181,7 +242,11 @@ export default function CreateOrderForm() {
           min="0"
           step="0.01"
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            if (errors.amount) setErrors((prev) => ({ ...prev, amount: undefined }));
+          }}
+          error={errors.amount}
         />
 
         <Input
@@ -189,7 +254,11 @@ export default function CreateOrderForm() {
           hint="If the farmer doesn't deliver by this time, you can refund the escrow."
           type="datetime-local"
           value={deliveryDeadline}
-          onChange={(e) => setDeliveryDeadline(e.target.value)}
+          onChange={(e) => {
+            setDeliveryDeadline(e.target.value);
+            if (errors.deliveryDeadline) setErrors((prev) => ({ ...prev, deliveryDeadline: undefined }));
+          }}
+          error={errors.deliveryDeadline}
         />
 
         <div className="grid w-full gap-1.5">
@@ -221,14 +290,12 @@ export default function CreateOrderForm() {
         )}
 
         {(createState.error || txStep === "error") && (
-          <div className="bg-destructive/10 text-destructive border-destructive/30 rounded-lg border p-3 text-sm">
-            {createState.error ?? "Transaction failed. Please try again."}
-          </div>
+          <FormError message={createState.error ?? "Transaction failed. Please try again."} />
         )}
 
         <Button
           size="lg"
-          disabled={!isValid}
+          disabled={!farmer.trim() || !amount || !deliveryDeadline}
           isLoading={createState.isLoading}
           onClick={handleSubmit}
           className="w-full"

@@ -6,6 +6,27 @@ datasource db {
   provider = "postgresql"
 }
 
+model Nonce {
+  id            String   @id @default(uuid())
+  walletAddress String   @unique
+  nonce         String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@map("Nonce")
+}
+
+model RefreshToken {
+  id            String   @id @default(uuid())
+  walletAddress String
+  token         String   @unique
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress])
+  @@map("RefreshToken")
+}
+
 model Notification {
   id            String   @id @default(uuid())
   walletAddress String
@@ -18,6 +39,14 @@ model Notification {
   @@index([walletAddress])
 }
 
+model NotificationPreference {
+  walletAddress String   @id
+  preferences   Json
+  updatedAt     DateTime @updatedAt
+
+  @@map("notification_preferences")
+}
+
 model User {
   id            String   @id @default(uuid())
   walletAddress String   @unique
@@ -26,7 +55,6 @@ model User {
   updatedAt     DateTime @updatedAt
 
   ordersAsBuyer  Order[] @relation("BuyerOrders")
-  ordersAsBuyer Order[]  @relation("BuyerOrders")
   ordersAsSeller Order[] @relation("SellerOrders")
 
   @@map("users")
@@ -51,18 +79,18 @@ model BuyerDemand {
 }
 
 model FarmerSupply {
-  id                 String    @id @default(uuid())
-  farmerWallet       String    @map("farmer_wallet")
-  cropName           String    @map("crop_name")
-  quantityAvailable  String    @map("quantity_available")
-  unit               String?
-  pricePerUnit       String?   @map("price_per_unit")
-  currency           String?
-  availableFrom      DateTime? @map("available_from")
-  availableUntil     DateTime? @map("available_until")
-  notes              String?
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id                String    @id @default(uuid())
+  farmerWallet      String    @map("farmer_wallet")
+  cropName          String    @map("crop_name")
+  quantityAvailable String    @map("quantity_available")
+  unit              String?
+  pricePerUnit      String?   @map("price_per_unit")
+  currency          String?
+  availableFrom     DateTime? @map("available_from")
+  availableUntil    DateTime? @map("available_until")
+  notes             String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@index([farmerWallet])
   @@map("farmer_supplies")
@@ -72,15 +100,14 @@ model Product {
   id           String   @id @default(uuid())
   farmerWallet String
   name         String
-  pricePerUnit String
+  pricePerUnit String   @map("price_per_unit")
   currency     String
-  isAvailable  Boolean  @default(true)
+  isAvailable  Boolean  @default(true) @map("is_available")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  orders Order[]
-  orders        Order[]
-  priceHistory  PriceHistory[]
+  orders       Order[]
+  priceHistory PriceHistory[]
 
   @@map("products")
 }
@@ -94,44 +121,41 @@ model Order {
   token          String
   status         String
   productId      String?
+  txHash         String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   buyerUser  User     @relation("BuyerOrders", fields: [buyerAddress], references: [walletAddress], onDelete: Cascade)
   sellerUser User     @relation("SellerOrders", fields: [sellerAddress], references: [walletAddress], onDelete: Cascade)
   product    Product? @relation(fields: [productId], references: [id])
-  buyerUser     User     @relation("BuyerOrders", fields: [buyerAddress], references: [walletAddress], onDelete: Cascade)
-  sellerUser    User     @relation("SellerOrders", fields: [sellerAddress], references: [walletAddress], onDelete: Cascade)
-  product       Product? @relation(fields: [productId], references: [id])
-  dispute       Dispute?
+  dispute    Dispute?
 
-  disputes    Dispute[]
   @@map("orders")
 }
 
 model Campaign {
-  id               String   @id @default(uuid())
-  campaignIdOnChain String  @unique
-  creatorAddress   String
-  goalAmount       String
-  token            String
-  status           String
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default(uuid())
+  campaignIdOnChain String   @unique
+  creatorAddress    String
+  goalAmount        String
+  token             String
+  status            String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([creatorAddress])
   @@map("campaigns")
 }
 
 model Investment {
-  id               String   @id @default(uuid())
-  sourceEventId    String   @unique
+  id                String   @id @default(uuid())
+  sourceEventId     String   @unique
   campaignIdOnChain String
-  investorAddress  String
-  amount           String
-  token            String
-  txHash           String?
-  createdAt        DateTime @default(now())
+  investorAddress   String
+  amount            String
+  token             String
+  txHash            String?
+  createdAt         DateTime @default(now())
 
   @@index([campaignIdOnChain])
   @@index([investorAddress])
@@ -139,66 +163,47 @@ model Investment {
 }
 
 model BlockchainTransaction {
-  id               String   @id @default(uuid())
-  sourceEventId    String   @unique
-  eventType        String
-  entity           String
-  action           String
-  ledger           Int
-  eventIndex       Int
-  txHash           String?
-  orderIdOnChain   String?
+  id                String   @id @default(uuid())
+  sourceEventId     String   @unique
+  eventType         String
+  entity            String
+  action            String
+  ledger            Int
+  eventIndex        Int
+  txHash            String?
+  orderIdOnChain    String?
   campaignIdOnChain String?
-  payload          Json?
-  createdAt        DateTime @default(now())
+  payload           Json?
+  createdAt         DateTime @default(now())
 
   @@unique([ledger, eventIndex])
   @@index([orderIdOnChain])
   @@index([campaignIdOnChain])
   @@map("transactions")
-
-model Dispute {
-  id          String    @id @default(uuid())
-  orderId     String    @unique
-  raisedBy    String
-  reason      String
-  status      String    @default("OPEN")
-  resolution  String?
-  resolvedBy  String?
-  resolvedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  @@index([status])
-  @@index([raisedBy])
-  @@map("disputes")
 }
 
-
 model EscrowEvent {
-  id          String   @id @default(uuid())
-  orderId     String
-  buyer       String
-  seller      String
-  amount      String
-  token       String
-  action      String
-  ledger      Int
-  eventIndex  Int
-  timestamp   DateTime
+  id         String   @id @default(uuid())
+  orderId    String
+  buyer      String
+  seller     String
+  amount     String
+  token      String
+  action     String
+  ledger     Int
+  eventIndex Int
+  timestamp  DateTime
 
   @@unique([ledger, eventIndex])
   @@map("escrow_events")
 }
 
 model EscrowTransaction {
-  id              String   @id @default(uuid())
-  orderIdOnChain  String
-  action          String
-  ledger          Int
-  timestamp       DateTime
+  id             String   @id @default(uuid())
+  orderIdOnChain String
+  action         String
+  ledger         Int
+  timestamp      DateTime
 
   @@map("escrow_transactions")
 }
@@ -210,7 +215,7 @@ model PriceHistory {
   currency  String
   timestamp DateTime
 
-  product   Product  @relation(fields: [productId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
 
   @@map("price_history")
 }
@@ -228,8 +233,8 @@ model Profile {
 
 model Location {
   wallet_address String   @id
-  lat            Float
-  lng            Float
+  lat            Float    @map("latitude")
+  lng            Float    @map("longitude")
   is_public      Boolean  @default(true)
   profile        Profile? @relation(fields: [wallet_address], references: [wallet_address])
 
@@ -245,17 +250,26 @@ model OrderMetadata {
   @@map("order_metadata")
 }
 
-model Dispute {
-  id              String   @id @default(uuid())
-  orderIdOnChain  String   @unique
-  raisedBy        String   // Wallet address of the one who raised it
-  status          String   // "OPEN", "RESOLVED"
-  outcome         String?  // "REFUNDED", "COMPLETED"
-  evidenceHash    String?  // Hash/CID of the evidence stored off-chain
-  createdAt       DateTime @default(now())
-  resolvedAt      DateTime?
+model ContractWatcherCheckpoint {
+  service    String   @id
+  lastLedger Int      @map("last_ledger")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  order           Order    @relation(fields: [orderIdOnChain], references: [orderIdOnChain])
-  
+  @@map("contract_watcher_checkpoints")
+}
+
+model Dispute {
+  id             String    @id @default(uuid())
+  orderIdOnChain String    @unique
+  raisedBy       String
+  status         String
+  outcome        String?
+  evidenceHash   String?
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  order Order @relation(fields: [orderIdOnChain], references: [orderIdOnChain])
+
   @@map("disputes")
 }

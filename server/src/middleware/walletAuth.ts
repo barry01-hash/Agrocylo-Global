@@ -1,48 +1,33 @@
-import type { NextFunction, Request, Response } from 'express';
-import { Keypair } from '@stellar/stellar-sdk';
-import { Keypair } from "@stellar/stellar-sdk";
+import type { NextFunction, Request, Response } from "express";
+import jwt from "jsonwebtoken";
+import { config } from "../config/index.js";
 
 export interface WalletRequest extends Request {
   walletAddress?: string;
 }
 
-const EVM_WALLET_REGEX = /^0x[a-fA-F0-9]{40}$/;
-
-function isStellarAddress(address: string): boolean {
-  try {
-    Keypair.fromPublicKey(address);
-    return true;
-  } catch {
-    return false;
-  }
+interface TokenPayload {
+  walletAddress?: string;
 }
 
 export function requireWallet(req: WalletRequest, res: Response, next: NextFunction): void {
-  const header = req.header('x-wallet-address');
-  if (!header) {
-    res.status(401).json({ message: 'Missing x-wallet-address header.' });
+  const authHeader = req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ message: 'Missing or invalid Authorization header.' });
     return;
   }
+
+  const token = authHeader.slice(7); // Remove 'Bearer ' prefix
 
   try {
-    Keypair.fromPublicKey(header);
-  } catch {
-    res.status(400).json({ message: 'Invalid Stellar wallet address format.' });
-    return;
+    const decoded = jwt.verify(token, config.jwtSecret) as TokenPayload;
+    if (!decoded.walletAddress) {
+      res.status(401).json({ message: 'Invalid token: missing walletAddress.' });
+      return;
+    }
+    req.walletAddress = decoded.walletAddress;
+    next();
+  } catch (err) {
+    res.status(401).json({ message: 'Invalid or expired token.' });
   }
-
-  req.walletAddress = header;
-  const walletAddress = header.trim();
-  const isEvmWallet = EVM_WALLET_REGEX.test(walletAddress);
-  const isStellarWallet = isStellarAddress(walletAddress);
-
-  if (!isEvmWallet && !isStellarWallet) {
-    res.status(400).json({ message: 'Invalid wallet address format.' });
-    return;
-  }
-
-  req.walletAddress = isEvmWallet
-    ? walletAddress.toLowerCase()
-    : walletAddress;
-  next();
 }
